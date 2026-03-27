@@ -1,121 +1,149 @@
 import 'package:flutter/material.dart';
+import 'services/expense_service.dart';
+import 'models/expense.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Smart Expense DB Test',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const DbTestScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class DbTestScreen extends StatefulWidget {
+  const DbTestScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<DbTestScreen> createState() => _DbTestScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _DbTestScreenState extends State<DbTestScreen> {
+  // 1. Instantiate the Service Layer
+  final ExpenseService _expenseService = ExpenseService();
+  
+  // 2. State is now a strongly typed List of Expense Models!
+  List<Expense> _expenses = [];
+  bool _isLoading = true;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _refreshExpenses();
+  }
+
+  // Fetch data using the Service
+  Future<void> _refreshExpenses() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _expenseService.getAllExpenses();
+      setState(() {
+        _expenses = data;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint('Error fetching expenses: $e');
+    }
+  }
+
+  // Add a test expense using the Model and Service
+  Future<void> _addTestExpense() async {
+    // Create an instance of the Model
+    final newExpense = Expense(
+      amount: 1500.50,
+      categoryId: 1, // 'Food & Dining' based on your default DB setup
+      merchantName: 'Pizza Hut Test',
+      dateTime: DateTime.now(),
+      note: 'Test entry via Service Layer',
+      source: 'manual',
+    );
+
+    try {
+      // Pass the Model to the Service
+      await _expenseService.addExpense(newExpense);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Test Expense Added via Service!')),
+        );
+      }
+      _refreshExpenses(); // Reload UI
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // Delete an expense using the Service
+  Future<void> _deleteExpense(int id) async {
+    await _expenseService.deleteExpense(id);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Expense Deleted!')),
+      );
+    }
+    _refreshExpenses();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
+        title: const Text('Layered Architecture Test'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _expenses.isEmpty
+              ? const Center(child: Text('No expenses yet. Add one!'))
+              : ListView.builder(
+                  itemCount: _expenses.length,
+                  itemBuilder: (context, index) {
+                    // 3. UI now uses the strongly typed Expense Model
+                    final expense = _expenses[index];
+                    
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          child: Text(expense.id.toString()),
+                        ),
+                        // Notice how we use dot notation (expense.amount) instead of map keys (expense['amount'])
+                        title: Text('Rs ${expense.amount} - ${expense.merchantName ?? 'Unknown'}'),
+                        subtitle: Text(
+                          'Category: ${expense.categoryName ?? 'ID: ${expense.categoryId}'}\n'
+                          'Source: ${expense.source}\n'
+                          'Date: ${expense.dateTime.toString().split(' ')[0]}',
+                        ),
+                        isThreeLine: true,
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _deleteExpense(expense.id!),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addTestExpense,
+        label: const Text('Add Test Expense'),
+        icon: const Icon(Icons.add),
       ),
     );
   }
