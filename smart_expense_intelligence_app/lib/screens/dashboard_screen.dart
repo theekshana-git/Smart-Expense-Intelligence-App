@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart'; 
 import 'add_expense_screen.dart';
 import '../models/expense.dart';
+import '../models/pending_expense.dart'; 
 import '../services/expense_service.dart';
-import 'expense_history_screen.dart'; // Fixed import
+import '../services/ocr_service.dart'; 
+import 'expense_history_screen.dart'; 
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -12,7 +15,7 @@ class DashboardScreen extends StatefulWidget {
   _DashboardScreenState createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
   final _expenseService = ExpenseService();
   bool _isLoading = true;
   double _totalSpent = 0.0;
@@ -21,10 +24,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final Color oceanDeep = const Color(0xFF006064);
   final Color oceanLight = const Color(0xFF00838F);
 
+  late AnimationController _fabController;
+  late Animation<double> _fabAnimation;
+
   @override
   void initState() {
     super.initState();
     _loadDashboardData();
+
+    _fabController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _fabAnimation = CurvedAnimation(
+      parent: _fabController,
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _fabController.dispose(); 
+    super.dispose();
+  }
+
+  void _toggleFab() {
+    if (_fabController.isDismissed) {
+      _fabController.forward();
+    } else {
+      _fabController.reverse();
+    }
   }
 
   Future<void> _loadDashboardData() async {
@@ -55,6 +84,138 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return 'Good Evening';
   }
 
+  Future<void> _scanReceipt() async {
+    final picker = ImagePicker();
+    
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80, 
+    );
+
+    if (image == null) return; 
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+
+    final ocrService = OcrService();
+    final PendingExpense? extractedData = await ocrService.processReceipt(image.path);
+
+    if (mounted) Navigator.pop(context);
+
+    if (extractedData == null || (extractedData.amount == null && extractedData.merchantName == null)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not read receipt clearly. Please try again or use manual entry."), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+
+    // 🧠 Run the Intelligence Engine (Now properly awaits the DB check!)
+    int guessedCategoryId = await ocrService.guessCategoryId(extractedData.merchantName);
+
+    if (mounted) {
+      _showOcrConfirmationDialog(extractedData, guessedCategoryId);
+    }
+  }
+
+  void _showOcrConfirmationDialog(PendingExpense data, int guessedCategoryId) {
+    final amountController = TextEditingController(text: data.amount?.toStringAsFixed(2) ?? '');
+    final merchantController = TextEditingController(text: data.merchantName ?? '');
+    
+    // State variable to hold the category the user selects in the dialog
+    int selectedCategoryId = guessedCategoryId;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder( 
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.auto_awesome, color: oceanDeep), 
+                const SizedBox(width: 8),
+                const Text("Smart Extract"),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Please verify the extracted details.", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: "Amount (Rs)", border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: merchantController,
+                    decoration: const InputDecoration(labelText: "Merchant Name", border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 12),
+                  // Auto-selected Category Dropdown
+                  DropdownButtonFormField<int>(
+                    value: selectedCategoryId,
+                    decoration: const InputDecoration(labelText: "Category", border: OutlineInputBorder()),
+                    items: const [
+                      DropdownMenuItem(value: 1, child: Text("Food & Dining")),
+                      DropdownMenuItem(value: 2, child: Text("Transport")),
+                      DropdownMenuItem(value: 3, child: Text("Entertainment")),
+                      DropdownMenuItem(value: 4, child: Text("Shopping")),
+                      DropdownMenuItem(value: 5, child: Text("Bills & Utilities")),
+                      DropdownMenuItem(value: 6, child: Text("Other")),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => selectedCategoryId = value);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Discard", style: TextStyle(color: Colors.red)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: oceanDeep),
+                onPressed: () async {
+                  final confirmedExpense = Expense(
+                    amount: double.tryParse(amountController.text) ?? 0.0,
+                    categoryId: selectedCategoryId, 
+                    merchantName: merchantController.text.isNotEmpty ? merchantController.text : 'Unknown',
+                    dateTime: DateTime.now(),
+                    source: 'ocr',
+                    createdAt: DateTime.now(),
+                  );
+
+                  await _expenseService.addExpense(confirmedExpense);
+                  
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Receipt saved successfully!")),
+                    );
+                    _loadDashboardData();
+                  }
+                },
+                child: const Text("Save Expense", style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        }
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -65,43 +226,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator(color: oceanDeep))
-          : RefreshIndicator(
-              color: oceanDeep,
-              onRefresh: _loadDashboardData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "${_getGreeting()}, User!",
-                      style: TextStyle(fontSize: 16, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+      body: Stack(
+        children: [
+          _isLoading
+              ? Center(child: CircularProgressIndicator(color: oceanDeep))
+              : RefreshIndicator(
+                  color: oceanDeep,
+                  onRefresh: _loadDashboardData,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "${_getGreeting()}, User!",
+                          style: TextStyle(fontSize: 16, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 24),
+                        _buildSummaryCard(),
+                        const SizedBox(height: 24),
+                        _buildRecentTransactionsHeader(),
+                        const SizedBox(height: 8),
+                        _buildRecentTransactionsList(),
+                      ],
                     ),
-                    const SizedBox(height: 24),
-                    _buildSummaryCard(),
-                    const SizedBox(height: 24),
-                    _buildRecentTransactionsHeader(),
-                    const SizedBox(height: 8),
-                    _buildRecentTransactionsList(),
-                  ],
+                  ),
+                ),
+          
+          if (_fabController.isAnimating || _fabController.isCompleted)
+            IgnorePointer(
+              ignoring: !_fabController.isCompleted,
+              child: GestureDetector(
+                onTap: _toggleFab,
+                child: FadeTransition(
+                  opacity: _fabAnimation,
+                  child: Container(color: Colors.black.withOpacity(0.5)),
                 ),
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const AddExpenseScreen()),
-          );
-          if (result == true) {
-            _loadDashboardData();
-          }
-        },
-        backgroundColor: oceanDeep,
-        child: const Icon(Icons.add, color: Colors.white),
+        ],
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          ScaleTransition(
+            scale: _fabAnimation,
+            child: FloatingActionButton.extended(
+              heroTag: 'scan',
+              onPressed: () {
+                _toggleFab();
+                _scanReceipt(); 
+              },
+              backgroundColor: Colors.white,
+              icon: Icon(Icons.camera_alt, color: oceanDeep),
+              label: Text("Scan Receipt", style: TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ScaleTransition(
+            scale: _fabAnimation,
+            child: FloatingActionButton.extended(
+              heroTag: 'manual',
+              onPressed: () async {
+                _toggleFab();
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AddExpenseScreen()),
+                );
+                if (result == true) {
+                  _loadDashboardData();
+                }
+              },
+              backgroundColor: Colors.white,
+              icon: Icon(Icons.edit, color: oceanDeep),
+              label: Text("Manual Entry", style: TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FloatingActionButton(
+            heroTag: 'main',
+            onPressed: _toggleFab,
+            backgroundColor: oceanDeep,
+            child: RotationTransition(
+              turns: Tween(begin: 0.0, end: 0.125).animate(_fabAnimation),
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }

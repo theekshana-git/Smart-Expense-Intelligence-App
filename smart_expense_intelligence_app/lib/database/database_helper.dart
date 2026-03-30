@@ -104,6 +104,24 @@ class DatabaseHelper {
     );
   }
 
+  // NEW: Find the most recently used category for a specific merchant
+  Future<int?> getCategoryForMerchant(String merchantName) async {
+    final db = await instance.database;
+    final result = await db.query(
+      DatabaseTables.expensesTable,
+      columns: ['category_id'],
+      where: 'merchant_name LIKE ?',
+      whereArgs: ['%$merchantName%'],
+      orderBy: 'date_time DESC',
+      limit: 1,
+    );
+
+    if (result.isNotEmpty) {
+      return result.first['category_id'] as int?;
+    }
+    return null; // Not found
+  }
+
   Future<void> close() async {
     final db = await instance.database;
     db.close();

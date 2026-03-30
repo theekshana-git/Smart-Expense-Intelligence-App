@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+<key>NSCameraUsageDescription</key>
+    <string>Smart Expense needs access to your camera to scan receipts and automatically extract transaction amounts.</string>
+    
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Smart Expense needs access to your photo library so you can upload existing pictures of your receipts.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
