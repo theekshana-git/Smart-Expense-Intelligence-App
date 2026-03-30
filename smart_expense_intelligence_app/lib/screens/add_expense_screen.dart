@@ -16,7 +16,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
   
-  String? _selectedCategoryId;
+  String? _selectedCategoryName;
   DateTime _selectedDate = DateTime.now();
   bool _isSaving = false;
 
@@ -33,16 +33,39 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   bool get isEditing => widget.expenseToEdit != null;
 
+  // --- Backend Mappers ---
+  int _getCategoryId(String name) {
+    switch (name) {
+      case 'Food & Dining': return 1;
+      case 'Transport': return 2;
+      case 'Entertainment': return 3;
+      case 'Shopping': return 4;
+      case 'Bills & Utilities': return 5;
+      default: return 6; // Other
+    }
+  }
+
+  String _getCategoryName(int id) {
+    switch (id) {
+      case 1: return 'Food & Dining';
+      case 2: return 'Transport';
+      case 3: return 'Entertainment';
+      case 4: return 'Shopping';
+      case 5: return 'Bills & Utilities';
+      default: return 'Other';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     if (isEditing) {
       _amountController.text = widget.expenseToEdit!.amount.toString();
-      _noteController.text = widget.expenseToEdit!.merchantName;
-      _selectedCategoryId = widget.expenseToEdit!.categoryId;
+      _noteController.text = widget.expenseToEdit!.merchantName ?? '';
+      _selectedCategoryName = widget.expenseToEdit!.categoryName ?? _getCategoryName(widget.expenseToEdit!.categoryId);
       _selectedDate = widget.expenseToEdit!.dateTime;
     } else {
-      _selectedCategoryId = _categoryData.keys.first; 
+      _selectedCategoryName = _categoryData.keys.first; 
     }
   }
 
@@ -67,7 +90,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   }
 
   Future<void> _deleteExpense() async {
-    // 1. POPUP: Confirmation Dialog
     final bool? confirm = await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -86,7 +108,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
     if (confirm == true && widget.expenseToEdit?.id != null) {
       await ExpenseService().deleteExpense(widget.expenseToEdit!.id!);
       if (mounted) {
-        // 2. NOTIFICATION: Success Message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Expense deleted successfully"))
         );
@@ -98,24 +119,25 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   Future<void> _saveOrUpdateExpense() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isSaving = true);
+      
+      // Building the Model with your rock-solid architecture
       final expenseData = Expense(
         id: isEditing ? widget.expenseToEdit!.id : null,
         amount: double.parse(_amountController.text),
-        categoryId: _selectedCategoryId ?? 'Other',
+        categoryId: _getCategoryId(_selectedCategoryName ?? 'Other'),
         merchantName: _noteController.text.isNotEmpty ? _noteController.text : 'Unknown', 
         dateTime: _selectedDate,
-        source: 'manual',
+        source: isEditing ? widget.expenseToEdit!.source : 'manual',
+        createdAt: isEditing ? widget.expenseToEdit!.createdAt : DateTime.now(),
       );
 
       if (isEditing) {
         await ExpenseService().updateExpense(expenseData);
-        // 3. NOTIFICATION: Update Success
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: const Text("Changes updated!"), backgroundColor: oceanDeep)
         );
       } else {
         await ExpenseService().addExpense(expenseData);
-        // 4. NOTIFICATION: Save Success
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: const Text("Expense saved!"), backgroundColor: oceanDeep)
         );
@@ -164,10 +186,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                 spacing: 8.0,
                 runSpacing: 8.0,
                 children: _categoryData.entries.map((entry) {
-                  final isSelected = _selectedCategoryId == entry.key;
+                  final isSelected = _selectedCategoryName == entry.key;
                   return ChoiceChip(
                     label: Text(entry.key),
-                    // Visual fix: Removed CircleAvatar to remove dark circle
                     avatar: Icon(
                       entry.value, 
                       color: isSelected ? Colors.white : oceanDeep, 
@@ -181,7 +202,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal
                     ),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    onSelected: (selected) => setState(() => _selectedCategoryId = entry.key),
+                    onSelected: (selected) => setState(() => _selectedCategoryName = entry.key),
                   );
                 }).toList(),
               ),

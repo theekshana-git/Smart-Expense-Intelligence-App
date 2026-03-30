@@ -38,8 +38,8 @@ class _ExpenseHistoryScreenState extends State<ExpenseHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final filtered = _allExpenses.where((e) => 
-      e.merchantName.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-      e.categoryId.toLowerCase().contains(_searchQuery.toLowerCase())
+      (e.merchantName ?? '').toLowerCase().contains(_searchQuery.toLowerCase()) ||
+      (e.categoryName ?? '').toLowerCase().contains(_searchQuery.toLowerCase())
     ).toList();
 
     return Scaffold(
@@ -86,8 +86,8 @@ class _ExpenseHistoryScreenState extends State<ExpenseHistoryScreen> {
                     backgroundColor: oceanDeep.withOpacity(0.1),
                     child: Icon(Icons.monetization_on, color: oceanDeep),
                   ),
-                  title: Text(expense.merchantName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(DateFormat('MMM dd, yyyy').format(expense.dateTime)),
+                  title: Text(expense.merchantName ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('${expense.categoryName ?? 'Other'} • ${DateFormat('MMM dd, yyyy').format(expense.dateTime)}'),
                   trailing: Text("- Rs ${expense.amount.toStringAsFixed(0)}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                 ),
               );

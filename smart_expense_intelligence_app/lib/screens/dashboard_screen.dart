@@ -3,8 +3,7 @@ import 'package:intl/intl.dart';
 import 'add_expense_screen.dart';
 import '../models/expense.dart';
 import '../services/expense_service.dart';
-// STEP 1: Using the absolute path to ensure Flutter finds the file
-import 'package:smart_expense_intelligence_app/screens/expense_history_screen.dart';
+import 'expense_history_screen.dart'; // Fixed import
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -78,7 +77,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "${_getGreeting()}, Rashmie!",
+                      "${_getGreeting()}, User!",
                       style: TextStyle(fontSize: 16, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                     ),
                     const SizedBox(height: 24),
@@ -95,8 +94,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onPressed: () async {
           final result = await Navigator.push(
             context,
-            // STEP 2: Removed 'const' here to allow dynamic data loading
-            MaterialPageRoute(builder: (context) => AddExpenseScreen()),
+            MaterialPageRoute(builder: (context) => const AddExpenseScreen()),
           );
           if (result == true) {
             _loadDashboardData();
@@ -155,8 +153,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onPressed: () async {
             await Navigator.push(
               context,
-              // STEP 2: Removed 'const' here as well
-              MaterialPageRoute(builder: (context) => ExpenseHistoryScreen()),
+              MaterialPageRoute(builder: (context) => const ExpenseHistoryScreen()),
             );
             _loadDashboardData();
           },
@@ -178,7 +175,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
             leading: CircleAvatar(backgroundColor: oceanDeep.withOpacity(0.1), child: Icon(Icons.monetization_on, color: oceanDeep)),
-            title: Text(expense.merchantName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            title: Text(expense.merchantName ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text(DateFormat('MMM dd').format(expense.dateTime)),
             trailing: Text("- Rs ${expense.amount.toStringAsFixed(0)}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
           ),
