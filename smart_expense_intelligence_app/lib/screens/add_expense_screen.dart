@@ -5,7 +5,7 @@ import '../services/expense_service.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   final Expense? expenseToEdit;
-  const AddExpenseScreen({Key? key, this.expenseToEdit}) : super(key: key);
+  const AddExpenseScreen({super.key, this.expenseToEdit});
 
   @override
   _AddExpenseScreenState createState() => _AddExpenseScreenState();

@@ -5,7 +5,7 @@ import '../services/expense_service.dart';
 import 'add_expense_screen.dart'; 
 
 class ExpenseHistoryScreen extends StatefulWidget {
-  const ExpenseHistoryScreen({Key? key}) : super(key: key);
+  const ExpenseHistoryScreen({super.key});
 
   @override
   _ExpenseHistoryScreenState createState() => _ExpenseHistoryScreenState();
