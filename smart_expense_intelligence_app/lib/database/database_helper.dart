@@ -41,7 +41,7 @@ class DatabaseHelper {
     await db.execute(DatabaseTables.createIndexDate);
     await db.execute(DatabaseTables.createIndexCategory);
     await db.execute(DatabaseTables.createIndexSource);
-    
+
     await _insertDefaultCategories(db);
   }
 
@@ -99,6 +99,33 @@ class DatabaseHelper {
     final db = await instance.database;
     return await db.delete(
       DatabaseTables.expensesTable,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ==========================================
+  // CRUD OPERATIONS FOR PENDING EXPENSES (SMS)
+  // ==========================================
+
+  // CREATE
+  Future<int> insertPendingExpense(Map<String, dynamic> pendingExpense) async {
+    final db = await instance.database;
+    return await db.insert(DatabaseTables.pendingExpensesTable, pendingExpense);
+  }
+
+  // READ Pending Expenses
+  Future<List<Map<String, dynamic>>> getPendingExpenses() async {
+    final db = await instance.database;
+    return await db.query(DatabaseTables.pendingExpensesTable,
+        orderBy: 'date_time DESC');
+  }
+
+  // DELETE
+  Future<int> deletePendingExpense(int id) async {
+    final db = await instance.database;
+    return await db.delete(
+      DatabaseTables.pendingExpensesTable,
       where: 'id = ?',
       whereArgs: [id],
     );

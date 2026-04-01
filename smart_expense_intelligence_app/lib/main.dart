@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'screens/dashboard_screen.dart';
+import 'services/sms_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize the SMS listener
+  SmsService smsService = SmsService();
+  smsService.initialize();
   runApp(const SmartExpenseApp());
 }
 
@@ -15,7 +21,7 @@ class SmartExpenseApp extends StatelessWidget {
       title: 'Smart Expense Intelligence',
       theme: ThemeData(
         brightness: Brightness.light, // Restored to Light
-        primaryColor: const Color(0xFF006064), 
+        primaryColor: const Color(0xFF006064),
         scaffoldBackgroundColor: Colors.grey[100], // Your original light grey
         useMaterial3: true,
       ),
