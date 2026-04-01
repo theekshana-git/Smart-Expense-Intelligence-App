@@ -6,6 +6,7 @@ import '../models/expense.dart';
 import '../models/pending_expense.dart';
 import '../services/expense_service.dart';
 import '../services/ocr_service.dart';
+import '../services/sms_service.dart';
 import 'expense_history_screen.dart';
 import '../database/database_helper.dart';
 
@@ -35,6 +36,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
+
+    // 1. Run the Boot-Up Sync instantly!
+    final smsService = SmsService();
+    smsService.initialize().then((_) {
+      // 2. Refresh the UI to show any newly synced alerts
+      _loadDashboardData(); 
+    });
+
     _loadDashboardData();
 
     _fabController = AnimationController(
@@ -139,12 +148,12 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // --- UPDATED: Process SMS Approval (Now opens the Smart Extract Popup!) ---
   Future<void> _processSmsApproval(Map<String, dynamic> smsExpenseData) async {
-    // 1. Run the Intelligence Engine for the SMS Merchant
+    // 1. Run the Intelligence Engine for the SMS Merchant (SELF-LEARNING APPLIES HERE!)
     final ocrService = OcrService();
     int guessedCategoryId =
         await ocrService.guessCategoryId(smsExpenseData['merchant_name']);
 
-    // 2. Convert the raw database map into a PendingExpense object (just like the OCR does)
+    // 2. Convert the raw database map into a PendingExpense object
     final pendingSmsData = PendingExpense(
       amount: (smsExpenseData['amount'] as num?)?.toDouble(),
       merchantName: smsExpenseData['merchant_name'],
@@ -210,7 +219,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  initialValue: selectedCategoryId,
+                  value: selectedCategoryId,
                   decoration: const InputDecoration(
                       labelText: "Category", border: OutlineInputBorder()),
                   items: const [
@@ -531,24 +540,20 @@ class PendingSmsAlerts extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    // Pulling your exact theme colors
     final Color oceanDeep = const Color(0xFF006064);
 
     return Column(
       children: pendingExpenses.map((expense) {
         return Card(
-          // Soft ocean-tinted background
           color: oceanDeep.withOpacity(0.05),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            // Subtle theme-colored border
             side: BorderSide(color: oceanDeep.withOpacity(0.2), width: 1),
           ),
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
             leading: CircleAvatar(
-              // Perfectly matches the icons in your "Recent Transactions" list!
               backgroundColor: oceanDeep.withOpacity(0.1),
               child: Icon(Icons.sms, color: oceanDeep, size: 20),
             ),
@@ -572,7 +577,6 @@ class PendingSmsAlerts extends StatelessWidget {
                   tooltip: "Discard",
                 ),
                 IconButton(
-                  // Changed to oceanDeep to perfectly match your floating action buttons
                   icon: Icon(Icons.check_circle, color: oceanDeep, size: 28),
                   onPressed: () => onApprove(expense),
                   tooltip: "Approve",

@@ -1,13 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:telephony/telephony.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database_helper.dart';
-
-// 1. THIS MUST BE A TOP-LEVEL FUNCTION
-@pragma('vm:entry-point')
-void onBackgroundMessage(SmsMessage message) async {
-  debugPrint("Background SMS received: ${message.body}");
-  await processSms(message.body ?? "");
-}
 
 // Top-level processing function
 Future<void> processSms(String text) async {
@@ -22,25 +16,19 @@ Future<void> processSms(String text) async {
   if (amount != null) {
     final dbHelper = DatabaseHelper.instance;
 
-    // --- THIS IS THE UPDATED MAP ---
     await dbHelper.insertPendingExpense({
       'amount': amount,
-      'merchant_name': merchant, // Fixed column name
-      'date_time': DateTime.now().toIso8601String(), // Fixed column name
-      'source': 'sms', // Required by your tables.dart CHECK constraint
-
-      // I removed 'category' and 'is_confirmed' because those
-      // columns do not exist in your pending_expenses table!
+      'merchant_name': merchant,
+      'date_time': DateTime.now().toIso8601String(),
+      'source': 'sms',
     });
 
-    debugPrint("Expense successfully saved to database!");
+    debugPrint("✅ SMS successfully staged in database!");
   }
 }
 
 double? _extractAmount(String text) {
-  // Regex to find amounts like Rs. 1500.00, LKR 500, $50.00
-  RegExp regExp = RegExp(r"(?:Rs|LKR|\$|USD)\.?\s*([\d,]+(?:\.\d{1,2})?)",
-      caseSensitive: false);
+  RegExp regExp = RegExp(r"(?:Rs\.?|LKR|\$|USD)\s*([\d,]+(?:\.\d{1,2})?)", caseSensitive: false);
   var match = regExp.firstMatch(text);
   if (match != null) {
     String amountStr = match.group(1)!.replaceAll(',', '');
@@ -50,41 +38,91 @@ double? _extractAmount(String text) {
 }
 
 String _extractMerchant(String text) {
-  // This is highly dependent on bank formats.
-  // Example: "paid to Uber via..." or "at Keells Super"
-  if (text.toLowerCase().contains('at ')) {
-    var parts = text.split(RegExp(r'at ', caseSensitive: false));
-    if (parts.length > 1) {
-      return parts[1].split(' ')[0]; // Grabs the first word after "at "
+  String lowerText = text.toLowerCase();
+  try {
+    if (lowerText.contains('at ')) {
+      var parts = text.split(RegExp(r'\bat\b', caseSensitive: false));
+      if (parts.length > 1) {
+        String afterAt = parts[1];
+        String merchant = afterAt.split(RegExp(r'\bon\b|\bvia\b', caseSensitive: false))[0];
+        return merchant.trim().toUpperCase();
+      }
+    } else if (lowerText.contains('to ')) {
+      var parts = text.split(RegExp(r'\bto\b', caseSensitive: false));
+      if (parts.length > 1) {
+        String afterTo = parts[1];
+        String merchant = afterTo.split(RegExp(r'\bon\b|\bvia\b', caseSensitive: false))[0];
+        return merchant.trim().toUpperCase();
+      }
     }
+  } catch (e) {
+    debugPrint("Error parsing merchant: $e");
   }
-  return "Unknown Merchant";
-}
-
-String _guessCategory(String merchant) {
-  String m = merchant.toLowerCase();
-  if (m.contains('uber') || m.contains('pickme')) return 'Transport';
-  if (m.contains('keells') || m.contains('cargills')) return 'Groceries';
-  if (m.contains('dialog') || m.contains('mobitel')) return 'Bills';
-  return 'Uncategorized';
+  return "UNKNOWN MERCHANT";
 }
 
 // --- The Actual Service Class ---
 class SmsService {
-  final Telephony telephony = Telephony.instance;
+  // 🛡️ THE SINGLETON PATTERN: Guarantees it only runs once!
+  static final SmsService _instance = SmsService._internal();
+  factory SmsService() => _instance;
+  SmsService._internal();
 
-  void initialize() async {
-    // Request permissions first
+  final Telephony telephony = Telephony.instance;
+  static const String _lastSyncKey = 'last_sms_sync_timestamp';
+  bool _isInitialized = false;
+
+  Future<void> initialize() async {
+    // If it already ran this session, abort immediately!
+    if (_isInitialized) return; 
+    
     bool? permissionsGranted = await telephony.requestPhoneAndSmsPermissions;
 
     if (permissionsGranted != null && permissionsGranted) {
+      _isInitialized = true; // Mark as running
+
+      // 1. Sync any messages that arrived while the app was closed
+      await syncMissedMessages();
+
+      // 2. Listen for new messages while the app is actively open
       telephony.listenIncomingSms(
-        onNewMessage: (SmsMessage message) {
-          // Handle SMS while app is in foreground
-          processSms(message.body ?? "");
+        onNewMessage: (SmsMessage message) async {
+          debugPrint("Foreground SMS received!");
+          await processSms(message.body ?? "");
+          
+          // 🛡️ THE TIMESTAMP FIX: Update the time so it doesn't resync on reboot!
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
         },
-        onBackgroundMessage: onBackgroundMessage,
+        listenInBackground: false, 
       );
     }
+  }
+
+  // 🧠 THE BOOT-UP SYNC ENGINE
+  Future<void> syncMissedMessages() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    int lastSyncTimestamp = prefs.getInt(_lastSyncKey) ?? 
+        DateTime.now().subtract(const Duration(days: 1)).millisecondsSinceEpoch;
+
+    List<SmsMessage> messages = await telephony.getInboxSms(
+        columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
+        sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.ASC)] 
+    );
+
+    final bankSenders = ['BOC', 'COMMERCIAL', 'HNB', 'SAMPATH', 'NDB'];
+
+    for (var message in messages) {
+      // 🛡️ Check if it arrived AFTER our last sync
+      if (message.date != null && message.date! > lastSyncTimestamp) {
+        if (bankSenders.contains(message.address?.toUpperCase())) {
+          await processSms(message.body ?? "");
+        }
+      }
+    }
+
+    // Save the new exact time
+    await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
   }
 }

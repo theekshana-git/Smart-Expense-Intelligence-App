@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'screens/dashboard_screen.dart';
-import 'services/sms_service.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize the SMS listener
-  SmsService smsService = SmsService();
-  smsService.initialize();
   runApp(const SmartExpenseApp());
 }
 
