@@ -153,4 +153,53 @@ class DatabaseHelper {
     final db = await instance.database;
     db.close();
   }
+
+  Future<double> getTotalExpensesByMonth(String monthYear) async {
+    final db = await database;
+
+    final result = await db.rawQuery(
+      '''
+    SELECT SUM(amount) as total 
+    FROM expenses 
+    WHERE strftime('%Y-%m', date_time) = ?
+    ''',
+      [monthYear],
+    );
+
+    if (result.isNotEmpty && result.first['total'] != null) {
+      return (result.first['total'] as num).toDouble();
+    }
+
+    return 0.0;
+  }
+
+  Future<Map<String, dynamic>?> getBudgetByMonth(String monthYear) async {
+    final db = await instance.database;
+
+    final result = await db.query(
+      DatabaseTables.monthlyBudgetsTable,
+      where: 'month_year = ?',
+      whereArgs: [monthYear],
+      limit: 1,
+    );
+
+    if (result.isNotEmpty) {
+      return result.first;
+    }
+
+    return null;
+  }
+
+  Future<int> insertBudget(String monthYear, double limitAmount) async {
+    final db = await database;
+
+    return await db.insert(
+      DatabaseTables.monthlyBudgetsTable,
+      {
+        'month_year': monthYear,
+        'limit_amount': limitAmount,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
 }
