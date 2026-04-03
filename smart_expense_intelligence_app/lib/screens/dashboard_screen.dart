@@ -7,8 +7,10 @@ import '../models/pending_expense.dart';
 import '../services/expense_service.dart';
 import '../services/ocr_service.dart';
 import '../services/sms_service.dart';
+import '../services/budget_service.dart';
 import 'expense_history_screen.dart';
 import '../database/database_helper.dart';
+import 'wallet_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -27,6 +29,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   // State for pending SMS expenses hosted here so the UI updates instantly
   List<Map<String, dynamic>> _pendingExpenses = [];
 
+  final BudgetService _budgetService = BudgetService();
+  DateTime _selectedDate = DateTime.now();
+  Map<String, double> _budgetData = {};
+
   final Color oceanDeep = const Color(0xFF006064);
   final Color oceanLight = const Color(0xFF00838F);
 
@@ -41,7 +47,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final smsService = SmsService();
     smsService.initialize().then((_) {
       // 2. Refresh the UI to show any newly synced alerts
-      _loadDashboardData(); 
+      _loadDashboardData();
     });
 
     _loadDashboardData();
@@ -72,21 +78,40 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
-    try {
-      final allExpenses = await _expenseService.getAllExpenses();
-      final pendingData =
-          await DatabaseHelper.instance.getPendingExpenses(); // Fetch SMS data
 
-      double sum = 0;
-      for (var expense in allExpenses) {
-        sum += expense.amount;
-      }
+    setState(() => _isLoading = true);
+
+    try {
+      String monthYear = DateFormat('yyyy-MM').format(_selectedDate);
+
+      // ✅ Get correct monthly expenses
+      double totalSpent =
+          await DatabaseHelper.instance.getTotalExpensesByMonth(monthYear);
+
+      // ✅ Get budget intelligence
+      final intelligence =
+          await _budgetService.calculateIntelligence(monthYear);
+
+      // ✅ Get recent expenses (optional: still global or filter later)
+      final allExpenses = await _expenseService.getAllExpenses();
+
+// ✅ FILTER by selected month
+      final filteredExpenses = allExpenses.where((expense) {
+        return expense.dateTime.year == _selectedDate.year &&
+            expense.dateTime.month == _selectedDate.month;
+      }).toList();
+
+      // ✅ SORT latest first
+      filteredExpenses.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+
+      final pendingData = await DatabaseHelper.instance.getPendingExpenses();
+
       if (mounted) {
         setState(() {
-          _totalSpent = sum;
-          _recentExpenses = allExpenses.take(5).toList();
-          _pendingExpenses = pendingData; // Update SMS alerts
+          _totalSpent = totalSpent;
+          _recentExpenses = filteredExpenses.take(5).toList();
+          _pendingExpenses = pendingData;
+          _budgetData = intelligence;
           _isLoading = false;
         });
       }
@@ -219,7 +244,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: selectedCategoryId,
+                  initialValue: selectedCategoryId,
                   decoration: const InputDecoration(
                       labelText: "Category", border: OutlineInputBorder()),
                   items: const [
@@ -290,6 +315,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
+        automaticallyImplyLeading:
+            false, //Removes back button from dashboard appbar
         title: const Text('Dashboard'),
         backgroundColor: oceanDeep,
         foregroundColor: Colors.white,
@@ -308,13 +335,35 @@ class _DashboardScreenState extends State<DashboardScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          "${_getGreeting()}, User!",
-                          style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey.shade700,
-                              fontWeight: FontWeight.w500),
+                        // --- UPDATED LAYOUT SECTION ---
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              "${_getGreeting()}, User!",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey.shade700,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+
+                            //Show ONLY if no budget exists
+                            if (_budgetData.isEmpty)
+                              TextButton(
+                                onPressed: _showBudgetDialog,
+                                child: Text(
+                                  "Enter Budget",
+                                  style: TextStyle(
+                                    color: oceanDeep,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
+                        // ------------------------------
+
                         const SizedBox(height: 16),
 
                         // --- Pending SMS Alerts Widget ---
@@ -405,54 +454,114 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildSummaryCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24.0),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
+    double limit = _budgetData['limit']!;
+    double spent = _budgetData['spent']!;
+    double dailySafe = _budgetData['dailySafe']!;
+    double progress = _budgetData['progress']!;
+
+    // Calculate percentage for UI (like old card)
+    String percentText =
+        spent > limit ? "Exceeded" : "${((spent / limit) * 100).toInt()}%";
+
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const WalletScreen(),
+          ),
+        );
+        _loadDashboardData();
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24.0),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
             colors: [oceanLight, oceanDeep],
             begin: Alignment.topLeft,
-            end: Alignment.bottomRight),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
               color: oceanDeep.withOpacity(0.3),
               blurRadius: 10,
-              offset: const Offset(0, 5))
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Total Spent This Month",
-              style: TextStyle(color: Colors.white70, fontSize: 16)),
-          const SizedBox(height: 8),
-          Text("Rs ${_totalSpent.toStringAsFixed(2)}",
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 24),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("Budget Limit",
-                  style: TextStyle(color: Colors.white70, fontSize: 14)),
-              Text("60%",
-                  style: TextStyle(color: Colors.white70, fontSize: 14)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: _totalSpent == 0
-                  ? 0.0
-                  : (_totalSpent / 50000).clamp(0.0, 1.0),
-              backgroundColor: Colors.white.withOpacity(0.2),
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-              minHeight: 8,
+              offset: const Offset(0, 5),
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Total Spent This Month",
+                style: TextStyle(color: Colors.white70, fontSize: 16)),
+            const SizedBox(height: 8),
+            Text("Rs ${spent.toStringAsFixed(2)}",
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text("Budget Limit: Rs ${limit.toStringAsFixed(0)}",
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 14)),
+                Text(percentText,
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 14)),
+              ],
             ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: LinearProgressIndicator(
+                value: progress.clamp(0.0, 1.0),
+                backgroundColor: Colors.white.withOpacity(0.2),
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                minHeight: 8,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text("Daily Safe Spend: Rs ${dailySafe.toStringAsFixed(0)}",
+                style: const TextStyle(color: Colors.white70)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showBudgetDialog() {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Set Monthly Budget"),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: "Enter amount"),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              double amount = double.tryParse(controller.text) ?? 0;
+
+              String monthYear = DateFormat('yyyy-MM').format(_selectedDate);
+
+              await DatabaseHelper.instance.insertBudget(monthYear, amount);
+
+              Navigator.pop(context);
+              _loadDashboardData();
+            },
+            child: const Text("Save"),
           ),
         ],
       ),
@@ -528,11 +637,11 @@ class PendingSmsAlerts extends StatelessWidget {
   final Function(int) onDiscard;
 
   const PendingSmsAlerts({
-    Key? key,
+    super.key,
     required this.pendingExpenses,
     required this.onApprove,
     required this.onDiscard,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -540,7 +649,7 @@ class PendingSmsAlerts extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final Color oceanDeep = const Color(0xFF006064);
+    const Color oceanDeep = Color(0xFF006064);
 
     return Column(
       children: pendingExpenses.map((expense) {
