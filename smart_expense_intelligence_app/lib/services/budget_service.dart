@@ -33,32 +33,32 @@ class BudgetService {
   }
 
   // Intelligence Engine
-  Future<Map<String, double>> calculateIntelligence(String monthYear) async {
+  Future<Map<String, double>> calculateIntelligence(String monthYear, double spent) async {
     final budgetMap = await DatabaseHelper.instance.getBudgetByMonth(monthYear);
 
-    if (budgetMap == null) return {};
-
-    double spent =
-        await DatabaseHelper.instance.getTotalExpensesByMonth(monthYear);
+    // If no budget is set, still return the amount spent!
+    if (budgetMap == null) {
+      return {
+        'limit': 0.0,
+        'spent': spent,
+        'dailySafe': 0.0,
+        'progress': 0.0,
+      };
+    }
 
     double limit = (budgetMap['limit_amount'] as num).toDouble();
-
-    int daysInMonth =
-        DateTime(_parseYear(monthYear), _parseMonth(monthYear) + 1, 0).day;
-
+    int daysInMonth = DateTime(_parseYear(monthYear), _parseMonth(monthYear) + 1, 0).day;
     int today = DateTime.now().day;
-
     int daysRemaining = daysInMonth - today + 1;
 
     double remaining = limit - spent;
-
-    double dailySafe = remaining / daysRemaining;
+    double dailySafe = remaining > 0 ? remaining / daysRemaining : 0.0;
 
     return {
       'limit': limit,
       'spent': spent,
-      'dailySafe': dailySafe > 0 ? dailySafe : 0,
-      'progress': (spent / limit).clamp(0.0, 1.0),
+      'dailySafe': dailySafe,
+      'progress': limit > 0 ? (spent / limit).clamp(0.0, 1.0) : 0.0,
     };
   }
 

@@ -1,114 +1,89 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:image_picker/image_picker.dart';
-import 'add_expense_screen.dart';
 import '../models/expense.dart';
 import '../models/pending_expense.dart';
 import '../services/expense_service.dart';
 import '../services/ocr_service.dart';
 import '../services/sms_service.dart';
 import '../services/budget_service.dart';
-import 'expense_history_screen.dart';
 import '../database/database_helper.dart';
-import 'wallet_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final Function(int)? onChangeTab; 
+  final int refreshTrigger; 
+
+  const DashboardScreen({super.key, this.onChangeTab, this.refreshTrigger = 0}); 
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen>
-    with SingleTickerProviderStateMixin {
+class _DashboardScreenState extends State<DashboardScreen> {
   final _expenseService = ExpenseService();
+  final BudgetService _budgetService = BudgetService();
+  
   bool _isLoading = true;
   double _totalSpent = 0.0;
   List<Expense> _recentExpenses = [];
-
-  // State for pending SMS expenses hosted here so the UI updates instantly
   List<Map<String, dynamic>> _pendingExpenses = [];
 
-  final BudgetService _budgetService = BudgetService();
   DateTime _selectedDate = DateTime.now();
   Map<String, double> _budgetData = {};
 
   final Color oceanDeep = const Color(0xFF006064);
   final Color oceanLight = const Color(0xFF00838F);
 
-  late AnimationController _fabController;
-  late Animation<double> _fabAnimation;
-
   @override
   void initState() {
     super.initState();
-
-    // 1. Run the Boot-Up Sync instantly!
     final smsService = SmsService();
     smsService.initialize().then((_) {
-      // 2. Refresh the UI to show any newly synced alerts
       _loadDashboardData();
     });
-
     _loadDashboardData();
-
-    _fabController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    );
-    _fabAnimation = CurvedAnimation(
-      parent: _fabController,
-      curve: Curves.easeOut,
-    );
   }
 
+  // ✅ MOVED OUTSIDE OF initState!
   @override
-  void dispose() {
-    _fabController.dispose();
-    super.dispose();
-  }
-
-  void _toggleFab() {
-    if (_fabController.isDismissed) {
-      _fabController.forward();
-    } else {
-      _fabController.reverse();
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshTrigger != oldWidget.refreshTrigger) {
+      _loadDashboardData();
     }
   }
 
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
-
     setState(() => _isLoading = true);
 
     try {
       String monthYear = DateFormat('yyyy-MM').format(_selectedDate);
 
-      // ✅ Get correct monthly expenses
-      double totalSpent =
-          await DatabaseHelper.instance.getTotalExpensesByMonth(monthYear);
-
-      // ✅ Get budget intelligence
-      final intelligence =
-          await _budgetService.calculateIntelligence(monthYear);
-
-      // ✅ Get recent expenses (optional: still global or filter later)
+      // 1. Get ALL expenses first
       final allExpenses = await _expenseService.getAllExpenses();
 
-// ✅ FILTER by selected month
+      // 2. Filter them for the selected month using Dart (100% reliable)
       final filteredExpenses = allExpenses.where((expense) {
         return expense.dateTime.year == _selectedDate.year &&
             expense.dateTime.month == _selectedDate.month;
       }).toList();
 
-      // ✅ SORT latest first
-      filteredExpenses.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+      // 3. Calculate the EXACT total spent from the list
+      double calculatedTotalSpent = 0.0;
+      for (var exp in filteredExpenses) {
+        calculatedTotalSpent += exp.amount;
+      }
 
+      // 4. Pass the calculated total to the Intelligence Engine!
+      final intelligence = await _budgetService.calculateIntelligence(monthYear, calculatedTotalSpent);
+
+      // 5. Sort latest first for the UI list
+      filteredExpenses.sort((a, b) => b.dateTime.compareTo(a.dateTime));
       final pendingData = await DatabaseHelper.instance.getPendingExpenses();
 
       if (mounted) {
         setState(() {
-          _totalSpent = totalSpent;
+          _totalSpent = calculatedTotalSpent;
           _recentExpenses = filteredExpenses.take(5).toList();
           _pendingExpenses = pendingData;
           _budgetData = intelligence;
@@ -127,71 +102,20 @@ class _DashboardScreenState extends State<DashboardScreen>
     return 'Good Evening';
   }
 
-  Future<void> _scanReceipt() async {
-    final picker = ImagePicker();
-
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 80,
-    );
-
-    if (image == null) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) =>
-          const Center(child: CircularProgressIndicator(color: Colors.white)),
-    );
-
-    final ocrService = OcrService();
-    final PendingExpense? extractedData =
-        await ocrService.processReceipt(image.path);
-
-    if (mounted) Navigator.pop(context);
-
-    if (extractedData == null ||
-        (extractedData.amount == null && extractedData.merchantName == null)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  "Could not read receipt clearly. Please try again or use manual entry."),
-              backgroundColor: Colors.red),
-        );
-      }
-      return;
-    }
-
-    int guessedCategoryId =
-        await ocrService.guessCategoryId(extractedData.merchantName);
-
-    if (mounted) {
-      _showConfirmationDialog(extractedData, guessedCategoryId);
-    }
-  }
-
-  // --- UPDATED: Process SMS Approval (Now opens the Smart Extract Popup!) ---
   Future<void> _processSmsApproval(Map<String, dynamic> smsExpenseData) async {
-    // 1. Run the Intelligence Engine for the SMS Merchant (SELF-LEARNING APPLIES HERE!)
     final ocrService = OcrService();
-    int guessedCategoryId =
-        await ocrService.guessCategoryId(smsExpenseData['merchant_name']);
+    int guessedCategoryId = await ocrService.guessCategoryId(smsExpenseData['merchant_name']);
 
-    // 2. Convert the raw database map into a PendingExpense object
     final pendingSmsData = PendingExpense(
       amount: (smsExpenseData['amount'] as num?)?.toDouble(),
       merchantName: smsExpenseData['merchant_name'],
-      dateTime: DateTime.tryParse(smsExpenseData['date_time'] ?? '') ??
-          DateTime.now(),
+      dateTime: DateTime.tryParse(smsExpenseData['date_time'] ?? '') ?? DateTime.now(),
       source: 'sms',
       createdAt: DateTime.now(),
     );
 
-    // 3. Show the exact same Smart Extract dialog used by the scanner
     if (mounted) {
-      _showConfirmationDialog(pendingSmsData, guessedCategoryId,
-          pendingSmsId: smsExpenseData['id']);
+      _showConfirmationDialog(pendingSmsData, guessedCategoryId, pendingSmsId: smsExpenseData['id']);
     }
   }
 
@@ -200,14 +124,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadDashboardData();
   }
 
-  // --- Universal Confirmation Dialog (Handles both OCR and SMS perfectly) ---
-  void _showConfirmationDialog(PendingExpense data, int guessedCategoryId,
-      {int? pendingSmsId}) {
-    final amountController =
-        TextEditingController(text: data.amount?.toStringAsFixed(2) ?? '');
-    final merchantController =
-        TextEditingController(text: data.merchantName ?? '');
-
+  void _showConfirmationDialog(PendingExpense data, int guessedCategoryId, {int? pendingSmsId}) {
+    final amountController = TextEditingController(text: data.amount?.toStringAsFixed(2) ?? '');
+    final merchantController = TextEditingController(text: data.merchantName ?? '');
     int selectedCategoryId = guessedCategoryId;
 
     showDialog(
@@ -226,34 +145,28 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text("Please verify the extracted details.",
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text("Please verify the extracted details.", style: TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      labelText: "Amount (Rs)", border: OutlineInputBorder()),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: "Amount (Rs)", border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: merchantController,
-                  decoration: const InputDecoration(
-                      labelText: "Merchant Name", border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: "Merchant Name", border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  initialValue: selectedCategoryId,
-                  decoration: const InputDecoration(
-                      labelText: "Category", border: OutlineInputBorder()),
+                  value: selectedCategoryId,
+                  decoration: const InputDecoration(labelText: "Category", border: OutlineInputBorder()),
                   items: const [
                     DropdownMenuItem(value: 1, child: Text("Food & Dining")),
                     DropdownMenuItem(value: 2, child: Text("Transport")),
                     DropdownMenuItem(value: 3, child: Text("Entertainment")),
                     DropdownMenuItem(value: 4, child: Text("Shopping")),
-                    DropdownMenuItem(
-                        value: 5, child: Text("Bills & Utilities")),
+                    DropdownMenuItem(value: 5, child: Text("Bills & Utilities")),
                     DropdownMenuItem(value: 6, child: Text("Other")),
                   ],
                   onChanged: (value) {
@@ -276,9 +189,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 final confirmedExpense = Expense(
                   amount: double.tryParse(amountController.text) ?? 0.0,
                   categoryId: selectedCategoryId,
-                  merchantName: merchantController.text.isNotEmpty
-                      ? merchantController.text
-                      : 'Unknown',
+                  merchantName: merchantController.text.isNotEmpty ? merchantController.text : 'Unknown',
                   dateTime: DateTime.now(),
                   source: data.source ?? 'unknown',
                   createdAt: DateTime.now(),
@@ -286,27 +197,51 @@ class _DashboardScreenState extends State<DashboardScreen>
 
                 await _expenseService.addExpense(confirmedExpense);
 
-                // If this came from an SMS, delete the pending SMS alert!
                 if (pendingSmsId != null) {
-                  await DatabaseHelper.instance
-                      .deletePendingExpense(pendingSmsId);
+                  await DatabaseHelper.instance.deletePendingExpense(pendingSmsId);
                 }
 
                 if (mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text("Expense saved successfully!")),
+                    const SnackBar(content: Text("Expense saved successfully!")),
                   );
-                  _loadDashboardData();
+                  _loadDashboardData(); 
                 }
               },
-              child: const Text("Save Expense",
-                  style: TextStyle(color: Colors.white)),
+              child: const Text("Save Expense", style: TextStyle(color: Colors.white)),
             ),
           ],
         );
       }),
+    );
+  }
+
+  void _showBudgetDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Set Monthly Budget"),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: "Enter amount"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              double amount = double.tryParse(controller.text) ?? 0;
+              String monthYear = DateFormat('yyyy-MM').format(_selectedDate);
+              await DatabaseHelper.instance.insertBudget(monthYear, amount);
+              if(mounted) Navigator.pop(context);
+              _loadDashboardData();
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
     );
   }
 
@@ -315,203 +250,90 @@ class _DashboardScreenState extends State<DashboardScreen>
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        automaticallyImplyLeading:
-            false, //Removes back button from dashboard appbar
+        automaticallyImplyLeading: false, 
         title: const Text('Dashboard'),
         backgroundColor: oceanDeep,
         foregroundColor: Colors.white,
         elevation: 0,
       ),
-      body: Stack(
-        children: [
-          _isLoading
-              ? Center(child: CircularProgressIndicator(color: oceanDeep))
-              : RefreshIndicator(
-                  color: oceanDeep,
-                  onRefresh: _loadDashboardData,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator(color: oceanDeep))
+          : RefreshIndicator(
+              color: oceanDeep,
+              onRefresh: _loadDashboardData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // --- UPDATED LAYOUT SECTION ---
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              "${_getGreeting()}, User!",
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey.shade700,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-
-                            //Show ONLY if no budget exists
-                            if (_budgetData.isEmpty)
-                              TextButton(
-                                onPressed: _showBudgetDialog,
-                                child: Text(
-                                  "Enter Budget",
-                                  style: TextStyle(
-                                    color: oceanDeep,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                          ],
+                        Text(
+                          "${_getGreeting()}, User!",
+                          style: TextStyle(fontSize: 16, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                         ),
-                        // ------------------------------
-
-                        const SizedBox(height: 16),
-
-                        // --- Pending SMS Alerts Widget ---
-                        PendingSmsAlerts(
-                          pendingExpenses: _pendingExpenses,
-                          onApprove: _processSmsApproval,
-                          onDiscard: _discardSms,
-                        ),
-
-                        const SizedBox(height: 16),
-                        _buildSummaryCard(),
-                        const SizedBox(height: 24),
-                        _buildRecentTransactionsHeader(),
-                        const SizedBox(height: 8),
-                        _buildRecentTransactionsList(),
+                        if (_budgetData.isEmpty)
+                          TextButton(
+                            onPressed: _showBudgetDialog,
+                            child: Text("Enter Budget", style: TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
+                          ),
                       ],
                     ),
-                  ),
-                ),
-          if (_fabController.isAnimating || _fabController.isCompleted)
-            IgnorePointer(
-              ignoring: !_fabController.isCompleted,
-              child: GestureDetector(
-                onTap: _toggleFab,
-                child: FadeTransition(
-                  opacity: _fabAnimation,
-                  child: Container(color: Colors.black.withOpacity(0.5)),
+                    const SizedBox(height: 16),
+                    PendingSmsAlerts(
+                      pendingExpenses: _pendingExpenses,
+                      onApprove: _processSmsApproval,
+                      onDiscard: _discardSms,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSummaryCard(),
+                    const SizedBox(height: 24),
+                    _buildRecentTransactionsHeader(),
+                    const SizedBox(height: 8),
+                    _buildRecentTransactionsList(),
+                  ],
                 ),
               ),
             ),
-        ],
-      ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          ScaleTransition(
-            scale: _fabAnimation,
-            child: FloatingActionButton.extended(
-              heroTag: 'scan',
-              onPressed: () {
-                _toggleFab();
-                _scanReceipt();
-              },
-              backgroundColor: Colors.white,
-              icon: Icon(Icons.camera_alt, color: oceanDeep),
-              label: Text("Scan Receipt",
-                  style:
-                      TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
-            ),
-          ),
-          const SizedBox(height: 16),
-          ScaleTransition(
-            scale: _fabAnimation,
-            child: FloatingActionButton.extended(
-              heroTag: 'manual',
-              onPressed: () async {
-                _toggleFab();
-                final result = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const AddExpenseScreen()),
-                );
-                if (result == true) {
-                  _loadDashboardData();
-                }
-              },
-              backgroundColor: Colors.white,
-              icon: Icon(Icons.edit, color: oceanDeep),
-              label: Text("Manual Entry",
-                  style:
-                      TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
-            ),
-          ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            heroTag: 'main',
-            onPressed: _toggleFab,
-            backgroundColor: oceanDeep,
-            child: RotationTransition(
-              turns: Tween(begin: 0.0, end: 0.125).animate(_fabAnimation),
-              child: const Icon(Icons.add, color: Colors.white),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildSummaryCard() {
-    double limit = _budgetData['limit']!;
-    double spent = _budgetData['spent']!;
-    double dailySafe = _budgetData['dailySafe']!;
-    double progress = _budgetData['progress']!;
+    double limit = _budgetData['limit'] ?? 0;
+    double spent = _budgetData['spent'] ?? 0;
+    double dailySafe = _budgetData['dailySafe'] ?? 0;
+    double progress = _budgetData['progress'] ?? 0;
 
-    // Calculate percentage for UI (like old card)
-    String percentText =
-        spent > limit ? "Exceeded" : "${((spent / limit) * 100).toInt()}%";
+    String percentText = limit > 0 
+        ? (spent > limit ? "Exceeded" : "${((spent / limit) * 100).toInt()}%") 
+        : "0%";
 
     return GestureDetector(
-      onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const WalletScreen(),
-          ),
-        );
-        _loadDashboardData();
+      onTap: () {
+        if (widget.onChangeTab != null) widget.onChangeTab!(1);
       },
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(24.0),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [oceanLight, oceanDeep],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          gradient: LinearGradient(colors: [oceanLight, oceanDeep], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: oceanDeep.withOpacity(0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            )
-          ],
+          boxShadow: [BoxShadow(color: oceanDeep.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Total Spent This Month",
-                style: TextStyle(color: Colors.white70, fontSize: 16)),
+            const Text("Total Spent This Month", style: TextStyle(color: Colors.white70, fontSize: 16)),
             const SizedBox(height: 8),
-            Text("Rs ${spent.toStringAsFixed(2)}",
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold)),
+            Text("Rs ${spent.toStringAsFixed(2)}", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text("Budget Limit: Rs ${limit.toStringAsFixed(0)}",
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 14)),
-                Text(percentText,
-                    style:
-                        const TextStyle(color: Colors.white70, fontSize: 14)),
+                Text("Budget Limit: Rs ${limit.toStringAsFixed(0)}", style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                Text(percentText, style: const TextStyle(color: Colors.white70, fontSize: 14)),
               ],
             ),
             const SizedBox(height: 8),
@@ -525,45 +347,9 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
             ),
             const SizedBox(height: 16),
-            Text("Daily Safe Spend: Rs ${dailySafe.toStringAsFixed(0)}",
-                style: const TextStyle(color: Colors.white70)),
+            Text("Daily Safe Spend: Rs ${dailySafe.toStringAsFixed(0)}", style: const TextStyle(color: Colors.white70)),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showBudgetDialog() {
-    final controller = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Set Monthly Budget"),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: "Enter amount"),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              double amount = double.tryParse(controller.text) ?? 0;
-
-              String monthYear = DateFormat('yyyy-MM').format(_selectedDate);
-
-              await DatabaseHelper.instance.insertBudget(monthYear, amount);
-
-              Navigator.pop(context);
-              _loadDashboardData();
-            },
-            child: const Text("Save"),
-          ),
-        ],
       ),
     );
   }
@@ -572,22 +358,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text("Recent Transactions",
-            style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87)),
+        const Text("Recent Transactions", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
         TextButton(
-          onPressed: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => const ExpenseHistoryScreen()),
-            );
-            _loadDashboardData();
+          onPressed: () {
+            if (widget.onChangeTab != null) widget.onChangeTab!(2);
           },
-          child: Text("See All",
-              style: TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
+          child: Text("See All", style: TextStyle(color: oceanDeep, fontWeight: FontWeight.bold)),
         ),
       ],
     );
@@ -595,31 +371,19 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildRecentTransactionsList() {
     if (_recentExpenses.isEmpty) {
-      return const Center(
-          child: Padding(
-              padding: EdgeInsets.all(32.0),
-              child: Text("No expenses yet. Add one!",
-                  style: TextStyle(color: Colors.grey))));
+      return const Center(child: Padding(padding: EdgeInsets.all(32.0), child: Text("No expenses yet. Add one!", style: TextStyle(color: Colors.grey))));
     }
     return Column(
       children: _recentExpenses.map((expense) {
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           elevation: 2,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
-            leading: CircleAvatar(
-                backgroundColor: oceanDeep.withOpacity(0.1),
-                child: Icon(Icons.monetization_on, color: oceanDeep)),
-            title: Text(expense.merchantName ?? 'Unknown',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            leading: CircleAvatar(backgroundColor: oceanDeep.withOpacity(0.1), child: Icon(Icons.monetization_on, color: oceanDeep)),
+            title: Text(expense.merchantName ?? 'Unknown', style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text(DateFormat('MMM dd').format(expense.dateTime)),
-            trailing: Text("- Rs ${expense.amount.toStringAsFixed(0)}",
-                style: const TextStyle(
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
+            trailing: Text("- Rs ${expense.amount.toStringAsFixed(0)}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
           ),
         );
       }).toList(),
@@ -662,34 +426,17 @@ class PendingSmsAlerts extends StatelessWidget {
           ),
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: oceanDeep.withOpacity(0.1),
-              child: Icon(Icons.sms, color: oceanDeep, size: 20),
-            ),
+            leading: CircleAvatar(backgroundColor: oceanDeep.withOpacity(0.1), child: Icon(Icons.sms, color: oceanDeep, size: 20)),
             title: Text(
               "Found SMS: ${expense['merchant_name']}",
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Colors.black87),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),
             ),
-            subtitle: Text(
-              "Amount: Rs. ${expense['amount']}",
-              style: TextStyle(color: oceanDeep, fontWeight: FontWeight.w600),
-            ),
+            subtitle: Text("Amount: Rs. ${expense['amount']}", style: const TextStyle(color: oceanDeep, fontWeight: FontWeight.w600)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.redAccent),
-                  onPressed: () => onDiscard(expense['id']),
-                  tooltip: "Discard",
-                ),
-                IconButton(
-                  icon: Icon(Icons.check_circle, color: oceanDeep, size: 28),
-                  onPressed: () => onApprove(expense),
-                  tooltip: "Approve",
-                ),
+                IconButton(icon: const Icon(Icons.close, color: Colors.redAccent), onPressed: () => onDiscard(expense['id']), tooltip: "Discard"),
+                IconButton(icon: const Icon(Icons.check_circle, color: oceanDeep, size: 28), onPressed: () => onApprove(expense), tooltip: "Approve"),
               ],
             ),
           ),

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/dashboard_screen.dart';
+import 'screens/main_scaffold.dart';
 
 
 void main() async {
@@ -22,7 +22,7 @@ class SmartExpenseApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.grey[100], // Your original light grey
         useMaterial3: true,
       ),
-      home: const DashboardScreen(),
+      home: const MainScaffold(),
     );
   }
 }

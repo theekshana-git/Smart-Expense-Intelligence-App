@@ -5,7 +5,8 @@ import '../services/expense_service.dart';
 import 'add_expense_screen.dart'; 
 
 class ExpenseHistoryScreen extends StatefulWidget {
-  const ExpenseHistoryScreen({super.key});
+  final int refreshTrigger; // ✅ ADD THIS
+  const ExpenseHistoryScreen({super.key, this.refreshTrigger = 0}); // ✅ UPDATE CONSTRUCTOR
 
   @override
   _ExpenseHistoryScreenState createState() => _ExpenseHistoryScreenState();
@@ -25,6 +26,14 @@ class _ExpenseHistoryScreenState extends State<ExpenseHistoryScreen> {
     super.initState();
     _loadAllExpenses();
   }
+
+  @override
+void didUpdateWidget(covariant ExpenseHistoryScreen oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  if (widget.refreshTrigger != oldWidget.refreshTrigger) {
+    _loadAllExpenses();
+  }
+}
 
   Future<void> _loadAllExpenses() async {
     setState(() => _isLoading = true);
