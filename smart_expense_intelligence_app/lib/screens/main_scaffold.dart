@@ -93,7 +93,7 @@ class _MainScaffoldState extends State<MainScaffold> with SingleTickerProviderSt
                 TextField(controller: merchantController, decoration: const InputDecoration(labelText: "Merchant Name", border: OutlineInputBorder())),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: selectedCategoryId,
+                  initialValue: selectedCategoryId,
                   decoration: const InputDecoration(labelText: "Category", border: OutlineInputBorder()),
                   items: const [
                     DropdownMenuItem(value: 1, child: Text("Food & Dining")),
