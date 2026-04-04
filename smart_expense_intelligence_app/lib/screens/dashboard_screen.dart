@@ -27,7 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Expense> _recentExpenses = [];
   List<Map<String, dynamic>> _pendingExpenses = [];
 
-  DateTime _selectedDate = DateTime.now();
+  final DateTime _selectedDate = DateTime.now();
   Map<String, double> _budgetData = {};
 
   final Color oceanDeep = const Color(0xFF006064);
@@ -159,7 +159,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: selectedCategoryId,
+                  initialValue: selectedCategoryId,
                   decoration: const InputDecoration(labelText: "Category", border: OutlineInputBorder()),
                   items: const [
                     DropdownMenuItem(value: 1, child: Text("Food & Dining")),
@@ -426,7 +426,7 @@ class PendingSmsAlerts extends StatelessWidget {
           ),
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: CircleAvatar(backgroundColor: oceanDeep.withOpacity(0.1), child: Icon(Icons.sms, color: oceanDeep, size: 20)),
+            leading: CircleAvatar(backgroundColor: oceanDeep.withOpacity(0.1), child: const Icon(Icons.sms, color: oceanDeep, size: 20)),
             title: Text(
               "Found SMS: ${expense['merchant_name']}",
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87),

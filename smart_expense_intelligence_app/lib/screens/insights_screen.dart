@@ -1,36 +1,91 @@
 import 'package:flutter/material.dart';
+import '../models/insight.dart';
+import '../services/insights_service.dart';
 
-class InsightsScreen extends StatelessWidget {
+class InsightsScreen extends StatefulWidget {
   const InsightsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final Color oceanDeep = const Color(0xFF006064);
+  State<InsightsScreen> createState() => _InsightsScreenState();
+}
 
+class _InsightsScreenState extends State<InsightsScreen> {
+  final InsightsService _insightsService = InsightsService();
+  late Future<List<Insight>> _insightsFuture;
+  final Color oceanDeep = const Color(0xFF006064); 
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInsights();
+  }
+
+  Future<void> _loadInsights() async {
+    setState(() {
+      _insightsFuture = _insightsService.generateInsights(DateTime.now());
+    });
+    await _insightsFuture;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: const Color(0xFFF5F7F8),
       appBar: AppBar(
-        title: const Text('Smart Insights'),
         backgroundColor: oceanDeep,
-        foregroundColor: Colors.white,
         elevation: 0,
+        title: const Text('Smart Insights', 
+          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lightbulb_outline, size: 80, color: oceanDeep.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            const Text(
-              "Intelligence Engine Offline",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "Behavior detection coming soon...",
-              style: TextStyle(color: Colors.grey),
-            ),
-          ],
+      body: RefreshIndicator(
+        color: oceanDeep,
+        onRefresh: _loadInsights,
+        child: FutureBuilder<List<Insight>>(
+          future: _insightsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator(color: oceanDeep));
+            }
+            final insights = snapshot.data ?? [];
+            return ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20.0),
+              itemCount: insights.length,
+              itemBuilder: (context, index) {
+                final insight = insights[index];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 20.0),
+                  padding: const EdgeInsets.all(24.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))],
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        insight.type == 'warning' ? Icons.warning_amber_rounded : Icons.lightbulb_rounded,
+                        color: insight.type == 'warning' ? Colors.orange : oceanDeep,
+                        size: 40,
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(insight.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 12),
+                            Text(insight.message, style: const TextStyle(fontSize: 17, color: Colors.black87, height: 1.5)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
         ),
       ),
     );
