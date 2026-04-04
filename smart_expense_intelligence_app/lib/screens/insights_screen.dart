@@ -3,7 +3,8 @@ import '../models/insight.dart';
 import '../services/insights_service.dart';
 
 class InsightsScreen extends StatefulWidget {
-  const InsightsScreen({super.key});
+  final int refreshTrigger; // ✅ ADDED: The trigger listener
+  const InsightsScreen({super.key, this.refreshTrigger = 0});
 
   @override
   State<InsightsScreen> createState() => _InsightsScreenState();
@@ -20,6 +21,15 @@ class _InsightsScreenState extends State<InsightsScreen> {
     _loadInsights();
   }
 
+  // ✅ ADDED: Forces the AI to recalculate the exact second a new expense is added
+  @override
+  void didUpdateWidget(covariant InsightsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshTrigger != oldWidget.refreshTrigger) {
+      _loadInsights();
+    }
+  }
+
   Future<void> _loadInsights() async {
     setState(() {
       _insightsFuture = _insightsService.generateInsights(DateTime.now());
@@ -32,6 +42,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7F8),
       appBar: AppBar(
+        automaticallyImplyLeading: false, // Ensures no back arrow on main tabs
         backgroundColor: oceanDeep,
         elevation: 0,
         title: const Text('Smart Insights', 
@@ -65,8 +76,10 @@ class _InsightsScreenState extends State<InsightsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
-                        insight.type == 'warning' ? Icons.warning_amber_rounded : Icons.lightbulb_rounded,
-                        color: insight.type == 'warning' ? Colors.orange : oceanDeep,
+                        insight.type == 'warning' ? Icons.warning_amber_rounded : 
+                        (insight.type == 'positive' ? Icons.check_circle_outline : Icons.lightbulb_rounded),
+                        color: insight.type == 'warning' ? Colors.orange : 
+                               (insight.type == 'positive' ? Colors.green : oceanDeep),
                         size: 40,
                       ),
                       const SizedBox(width: 20),
