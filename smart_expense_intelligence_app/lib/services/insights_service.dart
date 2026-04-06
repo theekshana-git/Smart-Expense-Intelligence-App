@@ -20,7 +20,6 @@ class InsightsService {
       WHERE strftime('%Y-%m', e.date_time) = ?
     ''', [monthYear]);
 
-    // Definition of Done: Positive insight if no data [cite: 100-101]
     if (allExpenses.isEmpty) {
       return [Insight(
         title: "Perfectly Balanced",
@@ -32,7 +31,7 @@ class InsightsService {
     double totalSpent = allExpenses.fold(0, (sum, e) => sum + (e['amount'] as num).toDouble());
     double comparisonBase = budgetLimit > 0 ? budgetLimit : totalSpent;
 
-    // --- RULE 1: Frequent Merchant [cite: 83-85] ---
+    // --- RULE 1: Frequent Merchant ---
     var merchantCounts = <String, int>{};
     for (var e in allExpenses) {
       String name = (e['merchant_name'] ?? 'Unknown').toString().trim();
@@ -42,7 +41,7 @@ class InsightsService {
     }
     if (merchantCounts.isNotEmpty) {
       var topEntry = merchantCounts.entries.reduce((a, b) => a.value > b.value ? a : b);
-      if (topEntry.value > 1) { // Correction: Only show for repeating behavior
+      if (topEntry.value > 1) { 
         insights.add(Insight(
           title: "Frequent Merchant",
           message: "You shop frequently at ${topEntry.key}. Consider loyalty programs there.",
@@ -51,11 +50,25 @@ class InsightsService {
       }
     }
 
-    // --- RULE 3: Late Night Transactions [cite: 89-91] ---
+    // ✅ ADDED RULE 2: High Food Spending 
+    double foodSpent = allExpenses
+        .where((e) => e['category_name'] == 'Food & Dining')
+        .fold(0, (sum, e) => sum + (e['amount'] as num).toDouble());
+    double foodPercent = (foodSpent / comparisonBase) * 100;
+
+    if (foodPercent > 35) {
+      insights.add(Insight(
+        title: "High Food Spending",
+        message: "Your food spending is over 35%. Try cooking at home more often to save money.",
+        type: 'warning'
+      ));
+    }
+
+    // --- RULE 3: Late Night Transactions ---
     int lateNightCount = 0;
     for (var e in allExpenses) {
       DateTime dt = DateTime.parse(e['date_time']);
-      if (dt.hour >= 22 || dt.hour <= 4) lateNightCount++; // 10PM to 4AM 
+      if (dt.hour >= 22 || dt.hour <= 4) lateNightCount++; 
     }
     
     if (lateNightCount > 3) {
@@ -66,7 +79,7 @@ class InsightsService {
       ));
     }
 
-    // --- RULE 4: High Transport (> 30%) [cite: 92-95] ---
+    // --- RULE 4: High Transport (> 30%) ---
     double transportSpent = allExpenses
         .where((e) => e['category_name'] == 'Transport')
         .fold(0, (sum, e) => sum + (e['amount'] as num).toDouble());
@@ -80,8 +93,7 @@ class InsightsService {
       ));
     }
 
-    // --- RULE 5: High "Wants" Spending (> 40%) [cite: 96-99] ---
-    // Joined check for is_essential == 0 
+    // --- RULE 5: High "Wants" Spending (> 40%) ---
     double wantsSpent = allExpenses
         .where((e) => e['is_essential'] == 0)
         .fold(0, (sum, e) => sum + (e['amount'] as num).toDouble());
@@ -107,14 +119,13 @@ class InsightsService {
     return insights;
   }
 
-  // Helper logic for unique messages per tier
   String _getTieredMessage(String rule, double percent) {
     if (rule == 'Transport') {
       if (percent >= 100) return "Transport budget exhausted! You must use public transit or walk.";
       if (percent >= 75) return "Your transport costs are critical. Avoid private rides for a few days.";
       if (percent >= 50) return "Half your transport budget is gone. Try sharing rides to save money.";
       return "Transport is taking up >30% of your budget. Suggest reducing ride-hailing.";
-    } else { // Wants
+    } else { 
       if (percent >= 100) return "100% of budget spent on non-essentials! Stop all shopping immediately.";
       if (percent >= 80) return "Non-essential spending is extremely high. You are risking your savings.";
       if (percent >= 60) return "Over 60% of spending is on 'wants'. Time to prioritize your 'needs'.";
