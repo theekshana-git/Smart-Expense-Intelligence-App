@@ -48,14 +48,14 @@ class DatabaseHelper {
   Future _insertDefaultCategories(Database db) async {
     // ✅ FIXED: Added Bills & Utilities (ID 5) and Other (ID 6)
     final List<Map<String, dynamic>> defaultCategories = [
-      {'name': 'Food & Dining', 'is_essential': 1},      // ID 1
-      {'name': 'Transport', 'is_essential': 1},          // ID 2
-      {'name': 'Entertainment', 'is_essential': 0},      // ID 3
-      {'name': 'Shopping', 'is_essential': 0},           // ID 4
-      {'name': 'Bills & Utilities', 'is_essential': 1},  // ID 5
-      {'name': 'Other', 'is_essential': 0},              // ID 6
+      {'name': 'Food & Dining', 'is_essential': 1}, // ID 1
+      {'name': 'Transport', 'is_essential': 1}, // ID 2
+      {'name': 'Entertainment', 'is_essential': 0}, // ID 3
+      {'name': 'Shopping', 'is_essential': 0}, // ID 4
+      {'name': 'Bills & Utilities', 'is_essential': 1}, // ID 5
+      {'name': 'Other', 'is_essential': 0}, // ID 6
     ];
-    
+
     for (var category in defaultCategories) {
       await db.insert(
         DatabaseTables.categoriesTable,
@@ -205,5 +205,17 @@ class DatabaseHelper {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  // ==========================================
+  // PHASE 5: DATA WIPE FUNCTION
+  // ==========================================
+  Future<void> wipeAllData() async {
+    final db = await instance.database;
+
+    // CRITICAL: We DO NOT delete the categories table! [cite: 1]
+    await db.delete(DatabaseTables.expensesTable);
+    await db.delete(DatabaseTables.pendingExpensesTable);
+    await db.delete(DatabaseTables.monthlyBudgetsTable);
   }
 }
