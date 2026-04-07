@@ -7,7 +7,7 @@
     <uses-permission android:name="android.permission.READ_SMS" />
 
     <application
-        android:label="smart_expense_intelligence_app"
+        android:label="Smart Expense Intelligence"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         
